@@ -15,13 +15,13 @@ using ScalarField = std::vector<float>;
 using WallField = std::vector<unsigned char>;
 
 struct SimParams {
-    float dt = 0.15f;
+    float dt = 0.1f;
     float smokeDecay = 0.01f;
     float temperatureDecay = 0.01f;
-    float buoyancyStrength = 0.2f;
-    float smokeWeight = 0.05f;
-    float vorticityStrength = 0.1f;
-    int pressureIterations = 35;
+    float buoyancyStrength = 0.15f;
+    float smokeWeight = 0.1f;
+    float vorticityStrength = 0.05f;
+    int pressureIterations = 50;
 };
 
 struct SimDiagnostics {
@@ -38,6 +38,14 @@ struct ScalarSample {
 };
 
 inline int IX(int x, int y) {
+    return y * NX + x;
+}
+
+inline int U_INDEX(int x, int y) {
+    return y * (NX + 1) + x;
+}
+
+inline int V_INDEX(int x, int y) {
     return y * NX + x;
 }
 
@@ -59,6 +67,9 @@ private:
     VectorField velocityPrev_;
     VectorField buoyancy_;
     VectorField vorticityForce_;
+
+    ScalarField u;
+    ScalarField v;
 
     ScalarField smoke_;
     ScalarField smokePrev_;
