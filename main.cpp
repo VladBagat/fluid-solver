@@ -7,8 +7,6 @@
 int main() {
     FluidSim sim;
 
-    writeWallMaskPGM(sim.wallField(), 0);
-
     std::ofstream diagnosticsCsv("animation/diagnostics.csv");
     writeDiagnosticsHeader(diagnosticsCsv);
 

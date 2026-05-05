@@ -21,10 +21,7 @@ FluidSim::FluidSim(const SimParams& params)
       scalarForward_(NX * NY),
       scalarBackward_(NX * NY),
       scalarClampMin_(NX * NY),
-      scalarClampMax_(NX * NY),
-      walls_(NX * NY) {
-    initializeWalls();
-}
+      scalarClampMax_(NX * NY) {}
 
 void FluidSim::step() {
     addSource();
@@ -41,54 +38,8 @@ const ScalarField& FluidSim::smokeField() const {
     return smoke_;
 }
 
-const WallField& FluidSim::wallField() const {
-    return walls_;
-}
-
 const SimDiagnostics& FluidSim::diagnostics() const {
     return diagnostics_;
-}
-
-void FluidSim::initializeWalls() {
-    std::fill(walls_.begin(), walls_.end(), 0);
-
-    for (int y = 0; y < NY; y++) {
-        walls_[IX(0, y)] = 1;
-        walls_[IX(NX - 1, y)] = 1;
-    }
-
-    for (int x = 0; x < NX; x++) {
-        walls_[IX(x, 0)] = 1;
-        walls_[IX(x, NY - 1)] = 1;
-    }
-
-    const int shelfX0 = NX / 4;
-    const int shelfX1 = (3 * NX) / 4;
-    const int shelfCenterY = (2 * NY) / 3;
-    const int shelfY0 = shelfCenterY - 1;
-    const int shelfY1 = shelfCenterY + 1;
-
-    for (int y = shelfY0; y <= shelfY1; y++) {
-        for (int x = shelfX0; x <= shelfX1; x++) {
-            walls_[IX(x, y)] = 1;
-        }
-    }
-}
-
-void FluidSim::clearWallCells(VectorField& field) const {
-    for (int i = 0; i < NX * NY; i++) {
-        if (walls_[i]) {
-            field[i] = Vector2D(0.0f, 0.0f);
-        }
-    }
-}
-
-void FluidSim::clearWallCells(ScalarField& field) const {
-    for (int i = 0; i < NX * NY; i++) {
-        if (walls_[i]) {
-            field[i] = 0.0f;
-        }
-    }
 }
 
 void FluidSim::addSource() {
@@ -98,10 +49,6 @@ void FluidSim::addSource() {
     for (int y = cy - 3; y <= cy + 3; y++) {
         for (int x = cx - 3; x <= cx + 3; x++) {
             int id = IX(x, y);
-            if (walls_[id]) {
-                continue;
-            }
-
             smoke_[id] = 1.0f;
             temperature_[id] = 5.0f;
         }
@@ -140,26 +87,17 @@ void FluidSim::project() {
 void FluidSim::advectScalars() {
     smokePrev_ = smoke_;
     advectScalar(smoke_, smokePrev_);
-    clearWallCells(smoke_);
 
     temperaturePrev_ = temperature_;
     advectScalar(temperature_, temperaturePrev_);
-    clearWallCells(temperature_);
 
     scalarDecay(smoke_, params_.smokeDecay);
     scalarDecay(temperature_, params_.temperatureDecay);
-
-    clearWallCells(smoke_);
-    clearWallCells(temperature_);
 }
 
 void FluidSim::addForce(const VectorField& force) {
     for (int i = 0; i < NX * NY; i++) {
-        if (walls_[i]) {
-            velocity_[i] = Vector2D(0.0f, 0.0f);
-        } else {
-            velocity_[i] += force[i] * params_.dt;
-        }
+        velocity_[i] += force[i] * params_.dt;
     }
 }
 
@@ -167,11 +105,6 @@ void FluidSim::advectVector(VectorField& dst, const VectorField& src, const Vect
     for (int y = 0; y < NY; y++) {
         for (int x = 0; x < NX; x++) {
             int id = IX(x, y);
-            if (walls_[id]) {
-                dst[id] = Vector2D(0.0f, 0.0f);
-                continue;
-            }
-
             Vector2D v = velocity[id];
             float prevX = x - params_.dt * v.x;
             float prevY = y - params_.dt * v.y;
@@ -188,11 +121,6 @@ void FluidSim::advectScalar(ScalarField& dst, const ScalarField& src) {
     for (int y = 0; y < NY; y++) {
         for (int x = 0; x < NX; x++) {
             int id = IX(x, y);
-
-            if (walls_[id]) {
-                dst[id] = 0.0f;
-                continue;
-            }
 
             float corrected = scalarForward_[id] + 0.5f * (src[id] - scalarBackward_[id]);
             dst[id] = std::clamp(corrected, scalarClampMin_[id], scalarClampMax_[id]);
@@ -211,17 +139,6 @@ void FluidSim::advectScalarSL(
     for (int y = 0; y < NY; y++) {
         for (int x = 0; x < NX; x++) {
             int id = IX(x, y);
-            if (walls_[id]) {
-                dst[id] = 0.0f;
-                if (clampMin) {
-                    (*clampMin)[id] = 0.0f;
-                }
-                if (clampMax) {
-                    (*clampMax)[id] = 0.0f;
-                }
-                continue;
-            }
-
             Vector2D v = velocity[id];
             float prevX = x - dt * v.x;
             float prevY = y - dt * v.y;
@@ -256,7 +173,7 @@ Vector2D FluidSim::sampleVector(const VectorField& field, float x, float y) cons
 
     auto addSample = [&](int sx, int sy, float weight) {
         int id = IX(sx, sy);
-        if (weight > 0.0f && !walls_[id]) {
+        if (weight > 0.0f) {
             result += field[id] * weight;
             weightSum += weight;
         }
@@ -295,7 +212,7 @@ ScalarSample FluidSim::sampleScalarWithRange(const ScalarField& field, float x, 
 
     auto addSample = [&](int sx, int sy, float weight) {
         int id = IX(sx, sy);
-        if (weight > 0.0f && !walls_[id]) {
+        if (weight > 0.0f) {
             float value = field[id];
             result += value * weight;
             weightSum += weight;
@@ -328,14 +245,11 @@ void FluidSim::computeDivergence() {
     for (int y = 1; y < NY - 1; y++) {
         for (int x = 1; x < NX - 1; x++) {
             int id = IX(x, y);
-            if (walls_[id]) {
-                continue;
-            }
 
-            float rightX = walls_[IX(x + 1, y)] ? 0.0f : u[U_INDEX(x + 1, y)];
-            float leftX = walls_[IX(x - 1, y)] ? 0.0f : u[U_INDEX(x, y)];
-            float topY = walls_[IX(x, y + 1)] ? 0.0f : v[V_INDEX(x, y + 1)];
-            float bottomY = walls_[IX(x, y - 1)] ? 0.0f : v[V_INDEX(x, y)];
+            float rightX = u[U_INDEX(x + 1, y)];
+            float leftX = u[U_INDEX(x, y)];
+            float topY = v[V_INDEX(x, y + 1)];
+            float bottomY = v[V_INDEX(x, y)];
 
             divergence_[id] = (rightX - leftX + topY - bottomY) / DX;
         }
@@ -349,91 +263,38 @@ void FluidSim::solvePressure() {
         for (int y = 1; y < NY - 1; y++) {
             for (int x = 1; x < NX - 1; x++) {
                 int id = IX(x, y);
-                if (walls_[id]) {
-                    pressure_[id] = 0.0f;
-                    continue;
-                }
 
-                float center = pressure_[id];
-                float right = walls_[IX(x + 1, y)] ? center : pressure_[IX(x + 1, y)];
-                float left = walls_[IX(x - 1, y)] ? center : pressure_[IX(x - 1, y)];
-                float top = walls_[IX(x, y + 1)] ? center : pressure_[IX(x, y + 1)];
-                float bottom = walls_[IX(x, y - 1)] ? center : pressure_[IX(x, y - 1)];
+                float right = pressure_[IX(x + 1, y)];
+                float left = pressure_[IX(x - 1, y)];
+                float top = pressure_[IX(x, y + 1)];
+                float bottom = pressure_[IX(x, y - 1)];
 
                 pressure_[id] = (right + left + top + bottom - divergence_[id]) / 4.0f;
             }
         }
     }
-
-    clearWallCells(pressure_);
 }
 
 void FluidSim::subtractPressureGradient() {
     for (int y = 1; y < NY - 1; y++) {
         for (int x = 1; x < NX - 1; x++) {
             int id = IX(x, y);
-            if (walls_[id]) {
-                velocity_[id] = Vector2D(0.0f, 0.0f);
-                continue;
-            }
 
-            float center = pressure_[id];
-            float right = walls_[IX(x + 1, y)] ? center : pressure_[IX(x + 1, y)];
-            float left = walls_[IX(x - 1, y)] ? center : pressure_[IX(x - 1, y)];
-            float top = walls_[IX(x, y + 1)] ? center : pressure_[IX(x, y + 1)];
-            float bottom = walls_[IX(x, y - 1)] ? center : pressure_[IX(x, y - 1)];
+            float right = pressure_[IX(x + 1, y)];
+            float left = pressure_[IX(x - 1, y)];
+            float top = pressure_[IX(x, y + 1)];
+            float bottom = pressure_[IX(x, y - 1)];
 
             float gradX = 0.5f * (right - left) / DX;
             float gradY = 0.5f * (top - bottom) / DX;
 
             velocity_[id].x -= gradX;
             velocity_[id].y -= gradY;
-
-            if (walls_[IX(x - 1, y)] && velocity_[id].x < 0.0f) {
-                velocity_[id].x = 0.0f;
-            }
-            if (walls_[IX(x + 1, y)] && velocity_[id].x > 0.0f) {
-                velocity_[id].x = 0.0f;
-            }
-            if (walls_[IX(x, y - 1)] && velocity_[id].y < 0.0f) {
-                velocity_[id].y = 0.0f;
-            }
-            if (walls_[IX(x, y + 1)] && velocity_[id].y > 0.0f) {
-                velocity_[id].y = 0.0f;
-            }
         }
     }
-
-    clearWallCells(velocity_);
 }
 
 void FluidSim::applyDomainBoundary() {
-    for (int y = 0; y < NY; y++) {
-        for (int x = 0; x < NX; x++) {
-            int id = IX(x, y);
-
-            if (walls_[id]) {
-                velocity_[id] = Vector2D(0.0f, 0.0f);
-                continue;
-            }
-
-            if (x > 0 && walls_[IX(x - 1, y)] && velocity_[id].x < 0.0f) {
-                velocity_[id].x = 0.0f;
-            }
-
-            if (x + 1 < NX && walls_[IX(x + 1, y)] && velocity_[id].x > 0.0f) {
-                velocity_[id].x = 0.0f;
-            }
-
-            if (y > 0 && walls_[IX(x, y - 1)] && velocity_[id].y < 0.0f) {
-                velocity_[id].y = 0.0f;
-            }
-
-            if (y + 1 < NY && walls_[IX(x, y + 1)] && velocity_[id].y > 0.0f) {
-                velocity_[id].y = 0.0f;
-            }
-        }
-    }
 }
 
 void FluidSim::scalarDecay(ScalarField& target, float decayRate) const {
@@ -453,11 +314,9 @@ void FluidSim::calculateBuoyancy() {
     for (int y = 0; y < NY; y++) {
         for (int x = 0; x < NX; x++) {
             int id = IX(x, y);
-            if (!walls_[id]) {
-                buoyancy_[id].y =
-                    params_.buoyancyStrength * (temperature_[id] - ambientTemperature) -
-                    params_.smokeWeight * smoke_[id];
-            }
+            buoyancy_[id].y =
+                params_.buoyancyStrength * (temperature_[id] - ambientTemperature) -
+                params_.smokeWeight * smoke_[id];
         }
     }
 }
@@ -467,10 +326,6 @@ void FluidSim::computeCurl() {
 
     for (int y = 1; y < NY - 1; y++) {
         for (int x = 1; x < NX - 1; x++) {
-            if (walls_[IX(x, y)]) {
-                continue;
-            }
-
             float dvdx = (velocity_[IX(x + 1, y)].y - velocity_[IX(x - 1, y)].y) * 0.5f / DX;
             float dudy = (velocity_[IX(x, y + 1)].x - velocity_[IX(x, y - 1)].x) * 0.5f / DX;
 
@@ -485,10 +340,6 @@ void FluidSim::computeVorticityForce() {
     for (int y = 1; y < NY - 1; y++) {
         for (int x = 1; x < NX - 1; x++) {
             int id = IX(x, y);
-
-            if (walls_[id]) {
-                continue;
-            }
 
             float dwdx = (std::abs(curl_[IX(x + 1, y)]) - std::abs(curl_[IX(x - 1, y)])) * 0.5f / DX;
             float dwdy = (std::abs(curl_[IX(x, y + 1)]) - std::abs(curl_[IX(x, y - 1)])) * 0.5f / DX;

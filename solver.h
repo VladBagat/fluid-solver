@@ -12,7 +12,6 @@ constexpr float DX = 1.0f;
 
 using VectorField = std::vector<Vector2D>;
 using ScalarField = std::vector<float>;
-using WallField = std::vector<unsigned char>;
 
 struct SimParams {
     float dt = 0.1f;
@@ -56,7 +55,6 @@ public:
     void step();
 
     const ScalarField& smokeField() const;
-    const WallField& wallField() const;
     const SimDiagnostics& diagnostics() const;
 
 private:
@@ -83,12 +81,6 @@ private:
     ScalarField scalarBackward_;
     ScalarField scalarClampMin_;
     ScalarField scalarClampMax_;
-
-    WallField walls_;
-
-    void initializeWalls();
-    void clearWallCells(VectorField& field) const;
-    void clearWallCells(ScalarField& field) const;
 
     void addSource();
     void advectVelocity();
@@ -126,7 +118,6 @@ private:
 };
 
 void writeSmokePGM(const ScalarField& smoke, int frame);
-void writeWallMaskPGM(const WallField& walls, int frame);
 void writeDiagnosticsHeader(std::ostream& out);
 void writeDiagnosticsRow(std::ostream& out, int frame, const SimDiagnostics& diagnostics);
 

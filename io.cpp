@@ -34,26 +34,6 @@ void writeSmokePGM(const ScalarField& smoke, int frame) {
     }
 }
 
-void writeWallMaskPGM(const WallField& walls, int frame) {
-    ensureAnimationDirectory();
-
-    std::ostringstream name;
-    name << "animation/wall_mask_"
-         << std::setw(5) << std::setfill('0') << frame
-         << ".pgm";
-
-    std::ofstream out(name.str(), std::ios::binary);
-
-    out << "P5\n" << NX << " " << NY << "\n255\n";
-
-    for (int y = NY - 1; y >= 0; y--) {
-        for (int x = 0; x < NX; x++) {
-            unsigned char pixel = walls[IX(x, y)] ? 255 : 0;
-            out.write(reinterpret_cast<char*>(&pixel), 1);
-        }
-    }
-}
-
 void writeDiagnosticsHeader(std::ostream& out) {
     out << "frame,"
         << "max_velocity,"
