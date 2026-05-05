@@ -1,5 +1,5 @@
 CXX := g++
-CXXFLAGS := -std=c++17 -Wall -Wextra -pedantic
+CXXFLAGS := -std=c++17 -Wextra -pedantic
 
 BUILD_DIR := build
 TARGET := $(BUILD_DIR)/solver

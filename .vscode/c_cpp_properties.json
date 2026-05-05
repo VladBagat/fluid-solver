@@ -6,6 +6,13 @@
       "cppStandard": "c++17",
       "cStandard": "c17",
       "intelliSenseMode": "linux-gcc-x64"
+    },
+    {
+      "name": "Windows",
+      "compilerPath": "C:/Program Files/LLVM/bin/clang++.exe",
+      "cppStandard": "c++17",
+      "cStandard": "c17",
+      "intelliSenseMode": "windows-clang-x64"
     }
   ],
   "version": 4
