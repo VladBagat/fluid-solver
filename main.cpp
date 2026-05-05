@@ -1,11 +1,14 @@
 #include "solver.h"
 
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 
 int main() {
     FluidSim sim;
+
+    std::filesystem::create_directories("animation");
 
     std::ofstream diagnosticsCsv("animation/diagnostics.csv");
     writeDiagnosticsHeader(diagnosticsCsv);

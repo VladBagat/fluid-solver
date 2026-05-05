@@ -61,13 +61,13 @@ private:
     SimParams params_;
     SimDiagnostics diagnostics_;
 
-    VectorField velocity_;
-    VectorField velocityPrev_;
     VectorField buoyancy_;
     VectorField vorticityForce_;
 
     ScalarField u;
+    ScalarField uPrev_;
     ScalarField v;
+    ScalarField vPrev_;
 
     ScalarField smoke_;
     ScalarField smokePrev_;
@@ -89,18 +89,20 @@ private:
     void advectScalars();
 
     void addForce(const VectorField& force);
-    void advectVector(VectorField& dst, const VectorField& src, const VectorField& velocity) const;
     void advectScalar(ScalarField& dst, const ScalarField& src);
     void advectScalarSL(
         ScalarField& dst,
         const ScalarField& src,
-        const VectorField& velocity,
         float dt,
         ScalarField* clampMin = nullptr,
         ScalarField* clampMax = nullptr
     ) const;
 
-    Vector2D sampleVector(const VectorField& field, float x, float y) const;
+    float sampleField(const ScalarField& field, int width, int height, float x, float y) const;
+    float sampleU(const ScalarField& field, float x, float y) const;
+    float sampleV(const ScalarField& field, float x, float y) const;
+    Vector2D sampleMacVelocity(float x, float y) const;
+    Vector2D sampleMacVelocity(const ScalarField& uField, const ScalarField& vField, float x, float y) const;
     ScalarSample sampleScalarWithRange(const ScalarField& field, float x, float y) const;
 
     void computeDivergence();

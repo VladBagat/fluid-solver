@@ -5,12 +5,12 @@
 
 FluidSim::FluidSim(const SimParams& params)
     : params_(params),
-      velocity_(NX * NY),
-      velocityPrev_(NX * NY),
       buoyancy_(NX * NY),
       vorticityForce_(NX * NY),
       u((NX + 1) * NY),
+      uPrev_((NX + 1) * NY),
       v(NX * (NY + 1)),
+      vPrev_(NX * (NY + 1)),
       smoke_(NX * NY),
       smokePrev_(NX * NY),
       temperature_(NX * NY),
@@ -56,8 +56,33 @@ void FluidSim::addSource() {
 }
 
 void FluidSim::advectVelocity() {
-    velocityPrev_ = velocity_;
-    advectVector(velocity_, velocityPrev_, velocityPrev_);
+    uPrev_ = u;
+    vPrev_ = v;
+
+    for (int y = 0; y < NY; y++) {
+        for (int x = 0; x <= NX; x++) {
+            float faceX = float(x) - 0.5f;
+            float faceY = float(y);
+            Vector2D velocity = sampleMacVelocity(uPrev_, vPrev_, faceX, faceY);
+            float prevX = faceX - params_.dt * velocity.x;
+            float prevY = faceY - params_.dt * velocity.y;
+
+            u[U_INDEX(x, y)] = sampleU(uPrev_, prevX, prevY);
+        }
+    }
+
+    for (int y = 0; y <= NY; y++) {
+        for (int x = 0; x < NX; x++) {
+            float faceX = float(x);
+            float faceY = float(y) - 0.5f;
+            Vector2D velocity = sampleMacVelocity(uPrev_, vPrev_, faceX, faceY);
+            float prevX = faceX - params_.dt * velocity.x;
+            float prevY = faceY - params_.dt * velocity.y;
+
+            v[V_INDEX(x, y)] = sampleV(vPrev_, prevX, prevY);
+        }
+    }
+
     applyDomainBoundary();
 }
 
@@ -96,27 +121,24 @@ void FluidSim::advectScalars() {
 }
 
 void FluidSim::addForce(const VectorField& force) {
-    for (int i = 0; i < NX * NY; i++) {
-        velocity_[i] += force[i] * params_.dt;
-    }
-}
-
-void FluidSim::advectVector(VectorField& dst, const VectorField& src, const VectorField& velocity) const {
     for (int y = 0; y < NY; y++) {
-        for (int x = 0; x < NX; x++) {
-            int id = IX(x, y);
-            Vector2D v = velocity[id];
-            float prevX = x - params_.dt * v.x;
-            float prevY = y - params_.dt * v.y;
+        for (int x = 1; x < NX; x++) {
+            float forceX = 0.5f * (force[IX(x - 1, y)].x + force[IX(x, y)].x);
+            u[U_INDEX(x, y)] += forceX * params_.dt;
+        }
+    }
 
-            dst[id] = sampleVector(src, prevX, prevY);
+    for (int y = 1; y < NY; y++) {
+        for (int x = 0; x < NX; x++) {
+            float forceY = 0.5f * (force[IX(x, y - 1)].y + force[IX(x, y)].y);
+            v[V_INDEX(x, y)] += forceY * params_.dt;
         }
     }
 }
 
 void FluidSim::advectScalar(ScalarField& dst, const ScalarField& src) {
-    advectScalarSL(scalarForward_, src, velocity_, params_.dt, &scalarClampMin_, &scalarClampMax_);
-    advectScalarSL(scalarBackward_, scalarForward_, velocity_, -params_.dt);
+    advectScalarSL(scalarForward_, src, params_.dt, &scalarClampMin_, &scalarClampMax_);
+    advectScalarSL(scalarBackward_, scalarForward_, -params_.dt);
 
     for (int y = 0; y < NY; y++) {
         for (int x = 0; x < NX; x++) {
@@ -131,7 +153,6 @@ void FluidSim::advectScalar(ScalarField& dst, const ScalarField& src) {
 void FluidSim::advectScalarSL(
     ScalarField& dst,
     const ScalarField& src,
-    const VectorField& velocity,
     float dt,
     ScalarField* clampMin,
     ScalarField* clampMax
@@ -139,9 +160,9 @@ void FluidSim::advectScalarSL(
     for (int y = 0; y < NY; y++) {
         for (int x = 0; x < NX; x++) {
             int id = IX(x, y);
-            Vector2D v = velocity[id];
-            float prevX = x - dt * v.x;
-            float prevY = y - dt * v.y;
+            Vector2D velocity = sampleMacVelocity(float(x), float(y));
+            float prevX = float(x) - dt * velocity.x;
+            float prevY = float(y) - dt * velocity.y;
 
             ScalarSample sample = sampleScalarWithRange(src, prevX, prevY);
             dst[id] = sample.value;
@@ -155,40 +176,44 @@ void FluidSim::advectScalarSL(
     }
 }
 
-Vector2D FluidSim::sampleVector(const VectorField& field, float x, float y) const {
-    x = std::clamp(x, 0.0f, float(NX - 1));
-    y = std::clamp(y, 0.0f, float(NY - 1));
+float FluidSim::sampleField(const ScalarField& field, int width, int height, float x, float y) const {
+    x = std::clamp(x, 0.0f, float(width - 1));
+    y = std::clamp(y, 0.0f, float(height - 1));
 
     int x0 = static_cast<int>(std::floor(x));
     int y0 = static_cast<int>(std::floor(y));
 
-    int x1 = std::min(x0 + 1, NX - 1);
-    int y1 = std::min(y0 + 1, NY - 1);
+    int x1 = std::min(x0 + 1, width - 1);
+    int y1 = std::min(y0 + 1, height - 1);
 
     float tx = x - float(x0);
     float ty = y - float(y0);
 
-    Vector2D result(0.0f, 0.0f);
-    float weightSum = 0.0f;
+    float bottomLeft = field[y0 * width + x0];
+    float bottomRight = field[y0 * width + x1];
+    float topLeft = field[y1 * width + x0];
+    float topRight = field[y1 * width + x1];
 
-    auto addSample = [&](int sx, int sy, float weight) {
-        int id = IX(sx, sy);
-        if (weight > 0.0f) {
-            result += field[id] * weight;
-            weightSum += weight;
-        }
-    };
+    float bottom = bottomLeft * (1.0f - tx) + bottomRight * tx;
+    float top = topLeft * (1.0f - tx) + topRight * tx;
 
-    addSample(x0, y0, (1.0f - tx) * (1.0f - ty));
-    addSample(x1, y0, tx * (1.0f - ty));
-    addSample(x0, y1, (1.0f - tx) * ty);
-    addSample(x1, y1, tx * ty);
+    return bottom * (1.0f - ty) + top * ty;
+}
 
-    if (weightSum == 0.0f) {
-        return Vector2D(0.0f, 0.0f);
-    }
+float FluidSim::sampleU(const ScalarField& field, float x, float y) const {
+    return sampleField(field, NX + 1, NY, x + 0.5f, y);
+}
 
-    return result / weightSum;
+float FluidSim::sampleV(const ScalarField& field, float x, float y) const {
+    return sampleField(field, NX, NY + 1, x, y + 0.5f);
+}
+
+Vector2D FluidSim::sampleMacVelocity(float x, float y) const {
+    return sampleMacVelocity(u, v, x, y);
+}
+
+Vector2D FluidSim::sampleMacVelocity(const ScalarField& uField, const ScalarField& vField, float x, float y) const {
+    return Vector2D(sampleU(uField, x, y), sampleV(vField, x, y));
 }
 
 ScalarSample FluidSim::sampleScalarWithRange(const ScalarField& field, float x, float y) const {
@@ -277,24 +302,30 @@ void FluidSim::solvePressure() {
 
 void FluidSim::subtractPressureGradient() {
     for (int y = 1; y < NY - 1; y++) {
+        for (int x = 1; x < NX; x++) {
+            float gradient = (pressure_[IX(x, y)] - pressure_[IX(x - 1, y)]) / DX;
+            u[U_INDEX(x, y)] -= gradient;
+        }
+    }
+
+    for (int y = 1; y < NY; y++) {
         for (int x = 1; x < NX - 1; x++) {
-            int id = IX(x, y);
-
-            float right = pressure_[IX(x + 1, y)];
-            float left = pressure_[IX(x - 1, y)];
-            float top = pressure_[IX(x, y + 1)];
-            float bottom = pressure_[IX(x, y - 1)];
-
-            float gradX = 0.5f * (right - left) / DX;
-            float gradY = 0.5f * (top - bottom) / DX;
-
-            velocity_[id].x -= gradX;
-            velocity_[id].y -= gradY;
+            float gradient = (pressure_[IX(x, y)] - pressure_[IX(x, y - 1)]) / DX;
+            v[V_INDEX(x, y)] -= gradient;
         }
     }
 }
 
 void FluidSim::applyDomainBoundary() {
+    for (int y = 0; y < NY; y++) {
+        u[U_INDEX(0, y)] = 0.0f;
+        u[U_INDEX(NX, y)] = 0.0f;
+    }
+
+    for (int x = 0; x < NX; x++) {
+        v[V_INDEX(x, 0)] = 0.0f;
+        v[V_INDEX(x, NY)] = 0.0f;
+    }
 }
 
 void FluidSim::scalarDecay(ScalarField& target, float decayRate) const {
@@ -326,8 +357,10 @@ void FluidSim::computeCurl() {
 
     for (int y = 1; y < NY - 1; y++) {
         for (int x = 1; x < NX - 1; x++) {
-            float dvdx = (velocity_[IX(x + 1, y)].y - velocity_[IX(x - 1, y)].y) * 0.5f / DX;
-            float dudy = (velocity_[IX(x, y + 1)].x - velocity_[IX(x, y - 1)].x) * 0.5f / DX;
+            float dvdx = (sampleMacVelocity(float(x + 1), float(y)).y -
+                          sampleMacVelocity(float(x - 1), float(y)).y) * 0.5f / DX;
+            float dudy = (sampleMacVelocity(float(x), float(y + 1)).x -
+                          sampleMacVelocity(float(x), float(y - 1)).x) * 0.5f / DX;
 
             curl_[IX(x, y)] = dvdx - dudy;
         }
@@ -360,9 +393,12 @@ void FluidSim::computeVorticityForce() {
 
 float FluidSim::maxVelocity() const {
     float result = 0.0f;
-    for (const Vector2D& velocity : velocity_) {
-        float magnitude = std::sqrt(velocity.x * velocity.x + velocity.y * velocity.y);
-        result = std::max(result, magnitude);
+    for (int y = 0; y < NY; y++) {
+        for (int x = 0; x < NX; x++) {
+            Vector2D velocity = sampleMacVelocity(float(x), float(y));
+            float magnitude = std::sqrt(velocity.x * velocity.x + velocity.y * velocity.y);
+            result = std::max(result, magnitude);
+        }
     }
     return result;
 }
